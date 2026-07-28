@@ -133,7 +133,10 @@ def overlay_gradcam(original_img, heatmap, alpha=0.4):
     img = np.array(original_img.resize((224, 224)))
 
     heatmap_uint8 = np.uint8(255 * heatmap)
-    jet = cm.get_cmap("jet")
+    try:
+        jet = cm.colormaps["jet"]
+    except AttributeError:
+        jet = cm.get_cmap("jet")
     jet_colors = jet(np.arange(256))[:, :3]
     jet_heatmap = jet_colors[heatmap_uint8]
 
@@ -184,9 +187,8 @@ if uploaded_file is not None:
             heatmap = make_gradcam_heatmap(img_array, layers, pred_index=top_idx)
             gradcam_img = overlay_gradcam(image, heatmap)
             gradcam_available = True
-        except Exception as e:
+        except Exception:
             gradcam_available = False
-            gradcam_error = str(e)
 
     top_class = CLASS_NAMES[top_idx]
     top_conf = predictions[top_idx] * 100
@@ -199,7 +201,7 @@ if uploaded_file is not None:
         if gradcam_available:
             st.image(gradcam_img, caption="🔥 Grad-CAM: Where the model is looking", use_container_width=True)
         else:
-            st.info(f"Grad-CAM could not be generated for this image.\n\nDEBUG: {gradcam_error}")
+            st.info("Grad-CAM could not be generated for this image.")
 
     # ---- Result box ----
     st.markdown(f"""
