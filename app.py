@@ -36,6 +36,13 @@ st.markdown("""
         background-color: #F0F7FF;
         border-left: 5px solid #2E86AB;
         margin-top: 1rem;
+        color: #1B1B1B;
+    }
+    .result-box h3, .result-box p {
+        color: #1B1B1B !important;
+    }
+    .result-box h2 {
+        color: #2E86AB !important;
     }
     h1 {
         color: #1B4965;
@@ -67,13 +74,32 @@ CLASS_INFO = {
 # ============================================================
 @st.cache_resource
 def get_gradcam_layers(_model):
-    """Extract the sub-layers needed to manually run the forward pass for Grad-CAM."""
-    rescaling_layer = _model.get_layer('rescaling_8')
-    base_model_layer = _model.get_layer('efficientnetb0')
-    gap_layer = _model.get_layer('global_average_pooling2d_5')
-    dense1_layer = _model.get_layer('dense_10')
-    dropout_layer = _model.get_layer('dropout_5')
-    dense2_layer = _model.get_layer('dense_11')
+    """Detect the sub-layers needed for Grad-CAM by type/class name instead of
+    hardcoded names, since Keras auto-generates suffixes that can differ
+    between environments (e.g. Kaggle vs Streamlit Cloud)."""
+    rescaling_layer = None
+    base_model_layer = None
+    gap_layer = None
+    dense_layers = []
+    dropout_layer = None
+
+    for layer in _model.layers:
+        cls_name = layer.__class__.__name__
+        if cls_name == "Rescaling":
+            rescaling_layer = layer
+        elif cls_name == "Functional" or "efficientnet" in layer.name.lower():
+            base_model_layer = layer
+        elif cls_name == "GlobalAveragePooling2D":
+            gap_layer = layer
+        elif cls_name == "Dense":
+            dense_layers.append(layer)
+        elif cls_name == "Dropout":
+            dropout_layer = layer
+
+    if not all([rescaling_layer, base_model_layer, gap_layer, dropout_layer]) or len(dense_layers) < 2:
+        raise ValueError("Could not auto-detect all required layers for Grad-CAM.")
+
+    dense1_layer, dense2_layer = dense_layers[0], dense_layers[1]
     return rescaling_layer, base_model_layer, gap_layer, dense1_layer, dropout_layer, dense2_layer
 
 def make_gradcam_heatmap(img_array, layers, pred_index=None):
