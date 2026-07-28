@@ -184,8 +184,9 @@ if uploaded_file is not None:
             heatmap = make_gradcam_heatmap(img_array, layers, pred_index=top_idx)
             gradcam_img = overlay_gradcam(image, heatmap)
             gradcam_available = True
-        except Exception:
+        except Exception as e:
             gradcam_available = False
+            gradcam_error = str(e)
 
     top_class = CLASS_NAMES[top_idx]
     top_conf = predictions[top_idx] * 100
@@ -198,7 +199,7 @@ if uploaded_file is not None:
         if gradcam_available:
             st.image(gradcam_img, caption="🔥 Grad-CAM: Where the model is looking", use_container_width=True)
         else:
-            st.info("Grad-CAM could not be generated for this image.")
+            st.info(f"Grad-CAM could not be generated for this image.\n\nDEBUG: {gradcam_error}")
 
     # ---- Result box ----
     st.markdown(f"""
