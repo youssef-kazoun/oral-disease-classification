@@ -3,7 +3,6 @@ import tensorflow as tf
 from tensorflow import keras
 import numpy as np
 from PIL import Image
-import matplotlib.cm as cm
 
 # ============================================================
 # Page Config
@@ -70,85 +69,6 @@ CLASS_INFO = {
 }
 
 # ============================================================
-# Grad-CAM helpers
-# ============================================================
-@st.cache_resource
-def get_gradcam_layers(_model):
-    """Detect the sub-layers needed for Grad-CAM by type/class name instead of
-    hardcoded names, since Keras auto-generates suffixes that can differ
-    between environments (e.g. Kaggle vs Streamlit Cloud)."""
-    rescaling_layer = None
-    base_model_layer = None
-    gap_layer = None
-    dense_layers = []
-    dropout_layer = None
-
-    for layer in _model.layers:
-        cls_name = layer.__class__.__name__
-        if cls_name == "Rescaling":
-            rescaling_layer = layer
-        elif cls_name == "Functional" or "efficientnet" in layer.name.lower():
-            base_model_layer = layer
-        elif cls_name == "GlobalAveragePooling2D":
-            gap_layer = layer
-        elif cls_name == "Dense":
-            dense_layers.append(layer)
-        elif cls_name == "Dropout":
-            dropout_layer = layer
-
-    if not all([rescaling_layer, base_model_layer, gap_layer, dropout_layer]) or len(dense_layers) < 2:
-        raise ValueError("Could not auto-detect all required layers for Grad-CAM.")
-
-    dense1_layer, dense2_layer = dense_layers[0], dense_layers[1]
-    return rescaling_layer, base_model_layer, gap_layer, dense1_layer, dropout_layer, dense2_layer
-
-def make_gradcam_heatmap(img_array, layers, pred_index=None):
-    rescaling_layer, base_model_layer, gap_layer, dense1_layer, dropout_layer, dense2_layer = layers
-
-    img_tensor = tf.convert_to_tensor(img_array, dtype=tf.float32)
-    rescaled = rescaling_layer(img_tensor)
-
-    with tf.GradientTape() as tape:
-        conv_outputs = base_model_layer(rescaled, training=False)
-        tape.watch(conv_outputs)
-        x = gap_layer(conv_outputs)
-        x = dense1_layer(x)
-        x = dropout_layer(x, training=False)
-        predictions = dense2_layer(x)
-
-        if pred_index is None:
-            pred_index = tf.argmax(predictions[0])
-        class_channel = predictions[:, pred_index]
-
-    grads = tape.gradient(class_channel, conv_outputs)
-    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-
-    conv_outputs = conv_outputs[0]
-    heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
-    heatmap = tf.squeeze(heatmap)
-    heatmap = tf.maximum(heatmap, 0) / (tf.math.reduce_max(heatmap) + 1e-8)
-    return heatmap.numpy()
-
-def overlay_gradcam(original_img, heatmap, alpha=0.4):
-    img = np.array(original_img.resize((224, 224)))
-
-    heatmap_uint8 = np.uint8(255 * heatmap)
-    try:
-        jet = cm.colormaps["jet"]
-    except AttributeError:
-        jet = cm.get_cmap("jet")
-    jet_colors = jet(np.arange(256))[:, :3]
-    jet_heatmap = jet_colors[heatmap_uint8]
-
-    jet_heatmap = Image.fromarray(np.uint8(jet_heatmap * 255))
-    jet_heatmap = jet_heatmap.resize((img.shape[1], img.shape[0]))
-    jet_heatmap = np.array(jet_heatmap)
-
-    superimposed_img = jet_heatmap * alpha + img
-    superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.uint8)
-    return Image.fromarray(superimposed_img)
-
-# ============================================================
 # Sidebar
 # ============================================================
 with st.sidebar:
@@ -172,6 +92,8 @@ uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png
 if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
 
+    st.image(image, caption="Uploaded Image", use_container_width=True)
+
     # Preprocess
     img_resized = image.resize((224, 224))
     img_array = np.array(img_resized) / 255.0
@@ -179,37 +101,17 @@ if uploaded_file is not None:
 
     with st.spinner("Analyzing..."):
         predictions = model.predict(img_array, verbose=0)[0]
-        top_idx = int(np.argmax(predictions))
 
-        # Grad-CAM
-        try:
-            layers = get_gradcam_layers(model)
-            heatmap = make_gradcam_heatmap(img_array, layers, pred_index=top_idx)
-            gradcam_img = overlay_gradcam(image, heatmap)
-            gradcam_available = True
-        except Exception:
-            gradcam_available = False
-
+    top_idx = int(np.argmax(predictions))
     top_class = CLASS_NAMES[top_idx]
     top_conf = predictions[top_idx] * 100
 
-    # ---- Images side by side ----
-    col1, col2 = st.columns(2)
-    with col1:
-        st.image(image, caption="Uploaded Image", use_container_width=True)
-    with col2:
-        if gradcam_available:
-            st.image(gradcam_img, caption="🔥 Grad-CAM: Where the model is looking", use_container_width=True)
-        else:
-            st.info("Grad-CAM could not be generated for this image.")
-
-    # ---- Result box ----
     st.markdown(f"""
     <div class="result-box">
         <h3>🔍 Predicted Diagnosis</h3>
-        <h2 style="color:#2E86AB;">{top_class}</h2>
+        <h2>{top_class}</h2>
         <p><b>Confidence:</b> {top_conf:.1f}%</p>
-        <p style="font-size:0.9rem; color:#555;">{CLASS_INFO[top_class]}</p>
+        <p style="font-size:0.9rem;">{CLASS_INFO[top_class]}</p>
     </div>
     """, unsafe_allow_html=True)
 
